@@ -1,0 +1,45 @@
+
+# ============================================================================
+# Extension pour DevContainer (VS Code Remote Containers)
+# ============================================================================
+
+services:
+  cpp-dev-tools:
+    # ========== Build Arguments ==========
+    build:
+      args:
+        - INCLUDE_DEEPLEARNING=false
+        - OPTIMIZATION=true
+
+    # ========== Development Environment ==========
+    environment:
+      - DEVELOPMENT_MODE=1
+      - VSCODE_MOUNT=/workspace
+      - HOME=/home/backend
+      - USER=backend
+
+    # ========== Additional Volumes for Development ==========
+    volumes:
+      # ========== VS Code Extensions Cache ==========
+      - vscode-extensions:/home/backend/.vscode-server/extensions
+      - vscode-insiders:/home/backend/.vscode-server-insiders/extensions
+
+      # ========== Shell Configuration ==========
+      - ./cpp-dev-tools/.devcontainer/.bashrc:/home/backend/.bashrc
+      - ./cpp-dev-tools/.devcontainer/.profile:/home/backend/.profile
+
+      # ========== Git Config ==========
+     # - ~/.gitconfig:/home/backend/.gitconfig:ro
+     # - ~/.git-credentials:/home/backend/.git-credentials:ro
+
+    # ========== Extended Ports ==========
+    ports:
+      # ========== Development Tools ==========
+      - "3310:3306"    # MySQL (optional)
+      - "27021:27017"  # MongoDB (optional)
+      - "5605:5601"    # Kibana (optional)
+      - "9204:9200"    # Elasticsearch (optional)
+
+volumes:
+  vscode-extensions:
+  vscode-insiders:
