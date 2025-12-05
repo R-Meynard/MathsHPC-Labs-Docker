@@ -1,0 +1,229 @@
+
+services:
+  # ============================================================================
+  # 🐳 C++ Dev Tools Container
+  # ============================================================================
+  cpp-dev-tools:
+    build:
+      context: ./cpp-dev-tools
+      dockerfile: Dockerfile
+      args:
+        - INCLUDE_DEEPLEARNING=false
+        - GO_VERSION=1.24.0
+    image: hpc-backend:latest
+    container_name: hpc-backend-dev
+
+    # ========== Ressources GPU ==========
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      # ========== Compiler Configuration ==========
+      - CC=gcc-12
+      - CXX=g++-12
+      - CFLAGS=-std=c17 -Wall -Wextra -O2
+      - CXXFLAGS=-std=c++20 -Wall -Wextra -O2
+
+      # ========== CUDA Configuration ==========
+      - CUDA_HOME=/usr/local/cuda
+      - CUDA_VISIBLE_DEVICES=0
+      - LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib64/openmpi/lib
+
+      # ========== MPI Configuration ==========
+      - OMPI_ALLOW_RUN_AS_ROOT=1
+      - OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
+      # ========== Go Configuration ==========
+      - GOROOT=/usr/local/go
+      - GOPATH=/root/go
+      - GO111MODULE=on
+
+      # ========== Python Configuration ==========
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/workspace
+
+      # ========== Development ==========
+      - DEBUG=1
+
+    volumes:
+      # ========== Code Workspace ==========
+      - ./workspace:/workspace
+      - ./cpp-dev-tools:/cpp-dev-tools
+
+      # ========== Docker Socket (pour Docker-in-Docker) ==========
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # ========== SSH Keys (optionnel) ==========
+      - ~/.ssh:/home/backend/.ssh:ro
+
+      # ========== Kubernetes Config (optionnel) ==========
+      - ~/.kube:/home/backend/.kube:ro
+
+      # ========== Persistent Caches ==========
+      - go-modules-cache:/root/go
+      - pip-cache:/root/.cache/pip
+      - cargo-cache:/root/.cargo
+
+    ports:
+      # ========== Development Ports ==========
+      - "8084:8080"    # API Backend
+      - "8892:8888"    # Jupyter
+      - "5004:5000"    # Flask/FastAPI
+
+      # ========== SSH ==========
+      - "2226:22"      # SSH (mapped to avoid conflict)
+
+    networks:
+      - hpc-backend-network
+
+    stdin_open: true
+    tty: true
+
+    # ========== Capabilities & Security ==========
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+
+    security_opt:
+      - "seccomp:unconfined"
+
+    sysctls:
+      - net.ipv4.ip_forward=1
+
+    ipc: host
+
+    # ========== Health Check ==========
+    healthcheck:
+      test: ["CMD", "go", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # 🗄️ PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: hpc-postgres
+    environment:
+      - POSTGRES_USER=backend
+      - POSTGRES_PASSWORD=backend-dev-password
+      - POSTGRES_DB=hpc_backend_db
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.UTF-8
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    ports:
+      - "5436:5432"
+
+    networks:
+      - hpc-backend-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backend"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # ⚡ Redis Cache
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: hpc-redis
+
+    volumes:
+      - redis-data:/data
+
+    ports:
+      - "6383:6379"
+
+    networks:
+      - hpc-backend-network
+
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 📊 Prometheus (Monitoring)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hpc-prometheus
+
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    ports:
+      - "9094:9090"
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+    networks:
+      - hpc-backend-network
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================================
+  # 🎨 Grafana (Visualization)
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hpc-grafana
+
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+
+    ports:
+      - "3005:3000"
+
+    depends_on:
+      - prometheus
+
+    networks:
+      - hpc-backend-network
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  postgres-data:
+  redis-data:
+  go-modules-cache:
+  pip-cache:
+  cargo-cache:
+
+networks:
+  hpc-backend-network:
+    driver: bridge
