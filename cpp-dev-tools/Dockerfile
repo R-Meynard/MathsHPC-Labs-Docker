@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /workspace
 
-# Basic deps + PPAs (ensure bzip2 for .tar.bz2 extraction)
+# Basic deps + PPAs (ensure bzip2/tar for .tar.bz2 extraction and tools for verification)
 RUN apt-get update --fix-missing && \
     apt-get install -y --no-install-recommends \
       software-properties-common \
@@ -21,6 +21,7 @@ RUN apt-get update --fix-missing && \
       dirmngr \
       bzip2 \
       tar \
+      file \
     && add-apt-repository ppa:ubuntu-toolchain-r/test -y \
     && add-apt-repository ppa:deadsnakes/ppa -y \
     && apt-get update --fix-missing && \
@@ -44,18 +45,32 @@ RUN apt-get update --fix-missing && \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install micromamba in a robust way and put it on PATH
+# Robust micromamba install: download, extract, chmod +x, verify binary and show diagnostics on failure
 ENV MAMBA_ROOT_PREFIX=/opt/conda
 RUN set -eux; \
     MICROMAMBA_URL="https://micromamba.snakepit.net/api/micromamba/linux-64/latest"; \
     mkdir -p /opt/micromamba; \
-    wget -qO /tmp/micromamba.tar.bz2 "${MICROMAMBA_URL}"; \
+    wget -O /tmp/micromamba.tar.bz2 "${MICROMAMBA_URL}"; \
+    # Basic sanity check: file size > 0
+    if [ ! -s /tmp/micromamba.tar.bz2 ]; then echo "micromamba archive is empty"; ls -l /tmp/micromamba.tar.bz2; exit 1; fi; \
     tar -xjf /tmp/micromamba.tar.bz2 -C /opt/micromamba --strip-components=1; \
+    # ensure executables have exec bit (some tar variants might preserve, enforce it)
+    chmod -R a+rx /opt/micromamba/bin || true; \
     ln -sf /opt/micromamba/bin/micromamba /usr/local/bin/micromamba; \
     rm -f /tmp/micromamba.tar.bz2; \
-    /usr/local/bin/micromamba --version
+    # Verify: if micromamba fails, dump diagnostics to help debugging
+    if ! /usr/local/bin/micromamba --version >/dev/null 2>&1; then \
+      echo "=== micromamba diagnostics ==="; \
+      ls -la /opt/micromamba || true; \
+      ls -la /opt/micromamba/bin || true; \
+      file /opt/micromamba/bin/micromamba || true; \
+      ldd /opt/micromamba/bin/micromamba || true; \
+      /usr/local/bin/micromamba --version || true; \
+      echo "=== end diagnostics ==="; \
+      exit 1; \
+    fi
 
-# Ensure micromamba and the eventual env are on PATH for subsequent RUNs
+# Ensure micromamba and (eventual) env come first on PATH for subsequent RUNs
 ENV PATH="/opt/micromamba/bin:${MAMBA_ROOT_PREFIX}/env/bin:${PATH}"
 
 # ARG flags for optional AI/LLM/Quantum layers
@@ -66,7 +81,7 @@ ARG ENABLE_TPU=false
 ARG ENABLE_NPU=false
 ARG CUDA_VERSION=12.1
 
-# Create a named micromamba env (only if flags require it)
+# Create a named micromamba env (use absolute micromamba path to avoid PATH timing issues)
 RUN if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
       /opt/micromamba/bin/micromamba create -y -p ${MAMBA_ROOT_PREFIX}/env python=3.11 && \
       /opt/micromamba/bin/micromamba clean --all -f -y; \
@@ -88,10 +103,8 @@ RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && \
     /tmp/llvm.sh 17 && \
     rm /tmp/llvm.sh
 
-# Install Python dependencies (fallback if micromamba env not created)
-# Use python3 from micromamba env when available; otherwise system python3.11
+# Install Python dependencies (use micromamba's python when available; fallback to system)
 RUN set -eux; \
-    # ensure pip exists in active python
     if command -v python3 >/dev/null 2>&1; then \
       python3 -m pip install --upgrade pip setuptools wheel || true; \
     fi; \
@@ -120,7 +133,7 @@ ENV GOROOT=/usr/local/go \
     GOPATH=/root/go \
     PATH=$PATH:/usr/local/go/bin:/root/go/bin
 
-# Install Rust (non-interactive), verify in same RUN and set PATH via ENV
+# Install Rust (non-interactive)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     /root/.cargo/bin/rustc --version
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -139,7 +152,7 @@ RUN apt-get update --fix-missing && \
     cd / && rm -rf /tmp/cccl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Optional: NVIDIA extras (cuDNN/NCCL placeholders) - enable only if ENABLE_AI=true
+# Optional: NVIDIA extras (cuDNN/NCCL placeholders)
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
       apt-get update && \
       apt-get install -y --no-install-recommends libcudnn8 libcudnn8-dev libnccl2 libnccl-dev || true && \
@@ -152,7 +165,7 @@ RUN if [ "${ENABLE_AI}" = "true" ]; then \
       pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 || true && \
       pip install --no-cache-dir tensorflow==2.14.* || true && \
       pip install --no-cache-dir jax jaxlib==0.4.*+cuda121 -f https://storage.googleapis.com/jax-releases/jax_releases.html || true && \
-      micromamba clean --all -f -y || true; \
+      /opt/micromamba/bin/micromamba clean --all -f -y || true; \
     fi && \
     if [ "${ENABLE_LLM}" = "true" ]; then \
       pip install --no-cache-dir transformers accelerate optimum datasets tokenizers safetensors || true && \
