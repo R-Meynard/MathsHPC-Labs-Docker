@@ -38,11 +38,17 @@ RUN apt-get update --fix-missing && \
       postgresql-client mysql-client redis-tools jq zip unzip sqlite3 sysbench \
       # other tooling (may be replaced by official repos if needed)
       docker-compose \
-      gitlab-runner \
       hwloc slurm-client \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install GitLab Runner from official packages.gitlab.com repository (signed)
+RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends gnupg curl lsb-release ca-certificates && \
+    curl -fsSL https://packages.gitlab.com/runner/gitlab-runner/gpgkey | gpg --dearmor -o /usr/share/keyrings/gitlab-runner-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/gitlab-runner-archive-keyring.gpg] https://packages.gitlab.com/runner/gitlab-runner/ubuntu/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/gitlab-runner.list && \
+    apt-get update --fix-missing && apt-get install -y --no-install-recommends gitlab-runner && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install LLVM 17 via the LLVM script (non-interactive).
 RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && \
@@ -105,7 +111,6 @@ RUN python3 -m pip install --upgrade \
       netCDF4 \
       h5py \
       pytest tox
-
 
 # Extensions pour AI / LLM / Quantum (snippet à intégrer dans votre Dockerfile existant)
 ARG ENABLE_AI=true
