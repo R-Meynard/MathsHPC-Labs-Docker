@@ -1,4 +1,3 @@
-
 services:
   # ============================================================================
   # 🐳 C++ Dev Tools Container
@@ -10,8 +9,8 @@ services:
       args:
         - INCLUDE_DEEPLEARNING=false
         - GO_VERSION=1.24.0
-    image: hpc-backend:latest
-    container_name: hpc-backend-dev
+    image: ghcr.io/r-meynard/mathshpc/hpc-backend:1.2.3
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-backend-dev"
     restart: unless-stopped
 
     # ===== GPU (device_requests works with recent docker/compose) =====
@@ -105,7 +104,7 @@ services:
   # ============================================================================
   postgres:
     image: postgres:15-alpine
-    container_name: hpc-postgres
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-postgres"
     restart: unless-stopped
     environment:
       POSTGRES_USER: backend
@@ -129,7 +128,7 @@ services:
   # ============================================================================
   redis:
     image: redis:7-alpine
-    container_name: hpc-redis
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-redis"
     restart: unless-stopped
     volumes:
       - redis-data:/data
@@ -149,7 +148,7 @@ services:
   # ============================================================================
   prometheus:
     image: prom/prometheus:latest
-    container_name: hpc-prometheus
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-prometheus"
     restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -172,7 +171,7 @@ services:
   # ============================================================================
   grafana:
     image: grafana/grafana:latest
-    container_name: hpc-grafana
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-grafana"
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
