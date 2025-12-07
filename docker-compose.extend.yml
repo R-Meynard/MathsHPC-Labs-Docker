@@ -1,40 +1,42 @@
-
 # ============================================================================
 # Extension pour DevContainer (VS Code Remote Containers)
 # ============================================================================
 
 services:
   cpp-dev-tools:
-    # ========== Build Arguments ==========
     build:
       args:
         - INCLUDE_DEEPLEARNING=false
         - OPTIMIZATION=true
 
-    # ========== Development Environment ==========
     environment:
       - DEVELOPMENT_MODE=1
       - VSCODE_MOUNT=/workspace
       - HOME=/home/backend
       - USER=backend
 
-    # ========== Additional Volumes for Development ==========
+    # Exécuter en tant qu'utilisateur "backend" (s'assurer qu'il est créé dans le Dockerfile)
+    user: "backend"
+
+    init: true
+    stdin_open: true
+    tty: true
+
     volumes:
-      # ========== VS Code Extensions Cache ==========
+      # VS Code Extensions Cache (persist extensions between rebuilds)
       - vscode-extensions:/home/backend/.vscode-server/extensions
       - vscode-insiders:/home/backend/.vscode-server-insiders/extensions
 
-      # ========== Shell Configuration ==========
-      - ./cpp-dev-tools/.devcontainer/.bashrc:/home/backend/.bashrc
-      - ./cpp-dev-tools/.devcontainer/.profile:/home/backend/.profile
+      # Shell Configuration (mount en lecture seule pour éviter écrasement accidentel)
+      - ./cpp-dev-tools/.devcontainer/.bashrc:/home/backend/.bashrc:ro
+      - ./cpp-dev-tools/.devcontainer/.profile:/home/backend/.profile:ro
 
-      # ========== Git Config ==========
-     # - ~/.gitconfig:/home/backend/.gitconfig:ro
-     # - ~/.git-credentials:/home/backend/.git-credentials:ro
+      # Git Config (décommentez si vous voulez monter vos configs locales)
+      # - ~/.gitconfig:/home/backend/.gitconfig:ro
+      # - ~/.git-credentials:/home/backend/.git-credentials:ro
 
-    # ========== Extended Ports ==========
     ports:
-      # ========== Development Tools ==========
+      # Development Tools (exposez uniquement ce que vous utilisez)
       - "3310:3306"    # MySQL (optional)
       - "27021:27017"  # MongoDB (optional)
       - "5605:5601"    # Kibana (optional)
