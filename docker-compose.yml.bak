@@ -1,0 +1,207 @@
+services:
+  # ============================================================================
+  # 🐳 C++ Dev Tools Container
+  # ============================================================================
+  cpp-dev-tools:
+    build:
+      context: ./cpp-dev-tools
+      dockerfile: Dockerfile
+      args:
+        - INCLUDE_DEEPLEARNING=false
+        - GO_VERSION=1.24.0
+    image: ghcr.io/r-meynard/mathshpc/hpc-backend:1.2.3
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-backend-dev"
+    restart: unless-stopped
+
+    # ===== GPU (device_requests works with recent docker/compose) =====
+    # Note: 'deploy' resources is ignored by docker-compose (non-Swarm). Keep for Swarm if needed.
+    #device_requests:
+      #- driver: nvidia
+        #count: -1       # -1 => all GPUs
+       # capabilities: [[gpu]]
+
+    # legacy alternative if device_requests not supported:
+    runtime: nvidia
+
+    environment:
+      # Compiler / CUDA / MPI / Go / Python configuration
+      NVIDIA_VISIBLE_DEVICES: all
+      CC: "gcc-12"
+      CXX: "g++-12"
+      CFLAGS: "-std=c17 -Wall -Wextra -O2"
+      CXXFLAGS: "-std=c++20 -Wall -Wextra -O2"
+      CUDA_HOME: "/usr/local/cuda"
+      CUDA_VISIBLE_DEVICES: "0"
+      LD_LIBRARY_PATH: "/usr/local/cuda/lib64:/usr/lib64/openmpi/lib"
+      OMPI_ALLOW_RUN_AS_ROOT: "1"
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+      GOROOT: "/usr/local/go"
+      GOPATH: "/root/go"
+      GO111MODULE: "on"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: "/workspace"
+      DEBUG: "1"
+      # Standardize user/home for root
+      HOME: "/root"
+      USER: "root"
+      # Sensitive values: prefer .env or docker secrets for real deployments
+      # POSTGRES_PASSWORD: "backend-dev-password"
+
+    volumes:
+      - ./workspace:/workspace:cached
+      - ./cpp-dev-tools:/cpp-dev-tools:ro
+      - /var/run/docker.sock:/var/run/docker.sock        # careful: grants host docker control
+      - ${HOME}/.ssh:/root/.ssh:ro                       # mount to /root when container runs as root
+      - ${HOME}/.kube:/root/.kube:ro                     # mount to /root when container runs as root
+      - go-modules-cache:/root/go
+      - pip-cache:/root/.cache/pip
+      - cargo-cache:/root/.cargo
+
+    ports:
+      - "8084:8080"    # API Backend
+      - "8892:8888"    # Jupyter
+      - "5004:5000"    # Flask/FastAPI
+      - "2226:22"      # SSH (mapped to avoid conflict)
+
+    networks:
+      - hpc-backend-network
+
+    stdin_open: true
+    tty: true
+
+    # ===== ulimits / shared memory (useful pour ML / Jupyter) =====
+    shm_size: '1gb'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack: 67108864
+
+    # ===== Capabilities & security (review before enabling) =====
+    # Keep minimum privileges; only add capabilities if strictly needed.
+    #cap_add:
+    #  - SYS_PTRACE   # useful for gdb inside container; consider dropping for production
+    #  - SYS_ADMIN    # very powerful; avoid unless required
+    #security_opt:
+    #  - "seccomp:unconfined"  # only if a tool needs unconfined seccomp
+
+    ipc: host
+
+    healthcheck:
+      test: ["CMD-SHELL", "go version || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # If your service depends on DB/Redis at startup:
+    depends_on:
+      - postgres
+      - redis
+
+  # ============================================================================
+  # 🗄️ PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-postgres"
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: backend
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-backend-dev-password}  # prefer .env or secrets
+      POSTGRES_DB: hpc_backend_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5436:5432"
+    networks:
+      - hpc-backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backend"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # ⚡ Redis Cache
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-redis"
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6383:6379"
+    networks:
+      - hpc-backend-network
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 📊 Prometheus (Monitoring)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-prometheus"
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9094:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - hpc-backend-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================================
+  # 🎨 Grafana (Visualization)
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: "${COMPOSE_PROJECT_NAME:-mathshpc}_hpc-grafana"
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "3005:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - hpc-backend-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  postgres-data:
+  redis-data:
+  go-modules-cache:
+  pip-cache:
+  cargo-cache:
+
+networks:
+  hpc-backend-network:
+    driver: bridge

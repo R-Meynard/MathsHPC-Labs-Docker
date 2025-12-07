@@ -1,0 +1,41 @@
+
+services:
+  cpp-dev-tools:
+    build:
+      args:
+        - INCLUDE_DEEPLEARNING=false
+        - OPTIMIZATION=true
+
+    environment:
+      - DEVELOPMENT_MODE=1
+      - VSCODE_MOUNT=/workspace
+      - HOME=/root
+      - USER=root
+
+    init: true
+    stdin_open: true
+    tty: true
+
+    volumes:
+      # VS Code Extensions Cache (persist extensions between rebuilds)
+      - vscode-extensions:/root/.vscode-server/extensions
+      - vscode-insiders:/root/.vscode-server-insiders/extensions
+
+      # Shell Configuration (mount en lecture seule pour éviter écrasement accidentel)
+      - ./cpp-dev-tools/.devcontainer/.bashrc:/root/.bashrc:ro
+      - ./cpp-dev-tools/.devcontainer/.profile:/root/.profile:ro
+
+      # Git Config (décommentez si vous voulez monter vos configs locales)
+      # - ~/.gitconfig:/root/.gitconfig:ro
+      # - ~/.git-credentials:/root/.git-credentials:ro
+
+    ports:
+      # Development Tools (exposez uniquement ce que vous utilisez)
+      - "3310:3306"    # MySQL (optional)
+      - "27021:27017"  # MongoDB (optional)
+      - "5605:5601"    # Kibana (optional)
+      - "9204:9200"    # Elasticsearch (optional)
+
+volumes:
+  vscode-extensions:
+  vscode-insiders:
