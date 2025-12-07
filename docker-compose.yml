@@ -16,16 +16,17 @@ services:
 
     # ===== GPU (device_requests works with recent docker/compose) =====
     # Note: 'deploy' resources is ignored by docker-compose (non-Swarm). Keep for Swarm if needed.
-    device_requests:
-      - driver: nvidia
-        count: -1       # -1 => all GPUs
-        capabilities: [[gpu]]
+    #device_requests:
+      #- driver: nvidia
+        #count: -1       # -1 => all GPUs
+       # capabilities: [[gpu]]
 
     # legacy alternative if device_requests not supported:
-    # runtime: nvidia
+    runtime: nvidia
 
     environment:
       # Compiler / CUDA / MPI / Go / Python configuration
+      NVIDIA_VISIBLE_DEVICES: all
       CC: "gcc-12"
       CXX: "g++-12"
       CFLAGS: "-std=c17 -Wall -Wextra -O2"
