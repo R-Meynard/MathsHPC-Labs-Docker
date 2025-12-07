@@ -1,0 +1,157 @@
+{
+  "name": "🚀 HPC + Backend PaaS DevContainer (Go 1.24 | GCC 12 | Clang 17 | Rust | Python 3.11)",
+  "dockerComposeFile": [
+    "../../docker-compose.yml",
+    "../../docker-compose.extend.yml"
+  ],
+  "service": "cpp-dev-tools",
+  "shutdownAction": "none",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "backend",
+  "initializeCommand": "bash -c 'echo \"📦 Initializing HPC + Backend DevContainer...\"'",
+  "onCreateCommand": "bash -c 'source /etc/profile && echo \"✅ Environment loaded\"'",
+  "postCreateCommand": "bash -c '\n    echo \"🎯 Post-Create Validation\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"\n    echo \"📊 Compiler Versions:\"\n    gcc --version | head -1\n    clang --version | head -1\n    go version\n    rustc --version\n    python3 --version\n    echo \"✅ HPC + Backend DevContainer Ready!\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"'",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "C_Cpp.default.compilerPath": "/usr/bin/g++-12",
+        "C_Cpp.default.cStandard": "c17",
+        "C_Cpp.default.cppStandard": "c++20",
+        "C_Cpp.default.intelliSenseEngine": "Tag Parser",
+        "C_Cpp.default.includePath": [
+          "${workspaceFolder}/**",
+          "/usr/local/cuda/include",
+          "/usr/include/openmpi"
+        ],
+        "C_Cpp.clang_format.style": "LLVM",
+        "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+        "cmake.autoSelectActiveFolder": true,
+        "cmake.configureOnOpen": true,
+        "cmake.parallel": 4,
+        "cmake.preferredGenerators": [
+          "Ninja Multi-Config",
+          "Unix Makefiles"
+        ],
+        "cmake.sourceDirectory": "${workspaceFolder}",
+        "cmake.buildDirectory": "${workspaceFolder}/build",
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "python.linting.enabled": true,
+        "python.testing.pytestEnabled": true,
+        "go.lintOnSave": "package",
+        "go.lintTool": "golangci-lint",
+        "editor.formatOnSave": true,
+        "editor.rulers": [
+          80,
+          120
+        ],
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "[cpp]": {
+          "editor.defaultFormatter": "xaver.clang-format",
+          "editor.formatOnSave": true
+        },
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.python",
+          "editor.formatOnSave": true
+        },
+        "[go]": {
+          "editor.defaultFormatter": "golang.go",
+          "editor.formatOnSave": true
+        }
+      },
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "twxs.cmake",
+        "ms-cmake-tools.cmake-tools",
+        "xaver.clang-format",
+        "vadimcn.vscode-lldb",
+        "golang.go",
+        "ms-python.python",
+        "rust-lang.rust-analyzer",
+        "mhutchie.git-graph",
+        "eamodio.gitlens",
+        "sonarsource.sonarlint-vscode",
+        "ms-vscode-remote.remote-containers",
+        "ms-vscode.docker"
+      ]
+    }
+  },
+  "forwardPorts": [
+    22,
+    5432,
+    6379,
+    3000,
+    5000,
+    8000,
+    8080,
+    8888,
+    9090,
+    16686
+  ],
+  "portsAttributes": {
+    "22": {
+      "label": "🔐 SSH",
+      "onAutoForward": "notify"
+    },
+    "3000": {
+      "label": "🎨 Grafana",
+      "onAutoForward": "openBrowser"
+    },
+    "5000": {
+      "label": "🐹 API",
+      "onAutoForward": "openBrowser"
+    },
+    "5432": {
+      "label": "🗄️ PostgreSQL",
+      "onAutoForward": "silent"
+    },
+    "6379": {
+      "label": "⚡ Redis",
+      "onAutoForward": "silent"
+    },
+    "8080": {
+      "label": "🔧 API Gateway",
+      "onAutoForward": "openBrowser"
+    },
+    "8888": {
+      "label": "📓 Jupyter",
+      "onAutoForward": "openBrowser"
+    },
+    "9090": {
+      "label": "📈 Prometheus",
+      "onAutoForward": "openBrowser"
+    },
+    "16686": {
+      "label": "🔗 Jaeger",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "remoteEnv": {
+    "CC": "gcc-12",
+    "CXX": "g++-12",
+    "CUDA_HOME": "/usr/local/cuda",
+    "GOROOT": "/usr/local/go",
+    "GOPATH": "/root/go",
+    "PYTHONPATH": "/workspace",
+    "KUBECONFIG": "/home/backend/.kube/config"
+  },
+  "runArgs": [
+    "--gpus=all",
+    "--ipc=host",
+    "--cap-add=SYS_PTRACE",
+    "--security-opt=seccomp:unconfined"
+  ],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=${env:HOME}/.ssh,target=/home/backend/.ssh,type=bind,readonly"
+  ]
+}
