@@ -10,7 +10,7 @@
   "remoteUser": "root",
   "initializeCommand": "bash -c 'echo \"📦 Initializing HPC + Backend DevContainer...\"'",
   "onCreateCommand": "bash -c 'source /etc/profile && echo \"✅ Environment loaded\"'",
-  "postCreateCommand": "bash -c '\n    echo \"🎯 Post-Create Validation\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"\n    echo \"📊 Compiler Versions:\"\n    gcc --version | head -1\n    clang --version | head -1\n    go version\n    rustc --version\n    python3 --version\n    echo \"✅ HPC + Backend DevContainer Ready!\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"'",
+  "postCreateCommand": "bash -c '\n    echo \"🎯 Post-Create Validation\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"\n    echo \"📊 Compiler Versions:\"\n    gcc --version | head -1\n    clang --version | head -1 || true\n    go version || true\n    rustc --version || true\n    python3 --version || true\n    echo \"✅ HPC + Backend DevContainer Ready!\"\n    echo \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\"'",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "moby": true,
@@ -142,16 +142,14 @@
     "GOROOT": "/usr/local/go",
     "GOPATH": "/root/go",
     "PYTHONPATH": "/workspace",
-    "KUBECONFIG": "/home/backend/.kube/config"
+    "KUBECONFIG": "/root/.kube/config"
   },
   "runArgs": [
     "--gpus=all",
-    "--ipc=host",
-    "--cap-add=SYS_PTRACE",
-    "--security-opt=seccomp:unconfined"
+    "--ipc=host"
   ],
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
-    "source=${env:HOME}/.ssh,target=/home/backend/.ssh,type=bind,readonly"
+    "source=${env:HOME}/.ssh,target=/root/.ssh,type=bind,readonly"
   ]
 }

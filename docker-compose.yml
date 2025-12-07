@@ -1,3 +1,4 @@
+version: "3.8"
 
 services:
   # ============================================================================
@@ -41,6 +42,9 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: "/workspace"
       DEBUG: "1"
+      # Standardize user/home for root
+      HOME: "/root"
+      USER: "root"
       # Sensitive values: prefer .env or docker secrets for real deployments
       # POSTGRES_PASSWORD: "backend-dev-password"
 
@@ -48,8 +52,8 @@ services:
       - ./workspace:/workspace:cached
       - ./cpp-dev-tools:/cpp-dev-tools:ro
       - /var/run/docker.sock:/var/run/docker.sock        # careful: grants host docker control
-      - ~/.ssh:/root/.ssh:ro                             # mount to /root if container runs as root
-      - ~/.kube:/root/.kube:ro                           # mount to /root if container runs as root
+      - ${HOME}/.ssh:/root/.ssh:ro                       # mount to /root when container runs as root
+      - ${HOME}/.kube:/root/.kube:ro                     # mount to /root when container runs as root
       - go-modules-cache:/root/go
       - pip-cache:/root/.cache/pip
       - cargo-cache:/root/.cargo

@@ -1,6 +1,4 @@
-# ============================================================================
-# Extension pour DevContainer (VS Code Remote Containers)
-# ============================================================================
+version: "3.8"
 
 services:
   cpp-dev-tools:
@@ -12,11 +10,8 @@ services:
     environment:
       - DEVELOPMENT_MODE=1
       - VSCODE_MOUNT=/workspace
-      - HOME=/home/backend
-      - USER=backend
-
-    # Exécuter en tant qu'utilisateur "backend" (s'assurer qu'il est créé dans le Dockerfile)
-    user: "backend"
+      - HOME=/root
+      - USER=root
 
     init: true
     stdin_open: true
@@ -24,16 +19,16 @@ services:
 
     volumes:
       # VS Code Extensions Cache (persist extensions between rebuilds)
-      - vscode-extensions:/home/backend/.vscode-server/extensions
-      - vscode-insiders:/home/backend/.vscode-server-insiders/extensions
+      - vscode-extensions:/root/.vscode-server/extensions
+      - vscode-insiders:/root/.vscode-server-insiders/extensions
 
       # Shell Configuration (mount en lecture seule pour éviter écrasement accidentel)
-      - ./cpp-dev-tools/.devcontainer/.bashrc:/home/backend/.bashrc:ro
-      - ./cpp-dev-tools/.devcontainer/.profile:/home/backend/.profile:ro
+      - ./cpp-dev-tools/.devcontainer/.bashrc:/root/.bashrc:ro
+      - ./cpp-dev-tools/.devcontainer/.profile:/root/.profile:ro
 
       # Git Config (décommentez si vous voulez monter vos configs locales)
-      # - ~/.gitconfig:/home/backend/.gitconfig:ro
-      # - ~/.git-credentials:/home/backend/.git-credentials:ro
+      # - ~/.gitconfig:/root/.gitconfig:ro
+      # - ~/.git-credentials:/root/.git-credentials:ro
 
     ports:
       # Development Tools (exposez uniquement ce que vous utilisez)
