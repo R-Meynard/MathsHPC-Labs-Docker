@@ -45,30 +45,30 @@ RUN apt-get update --fix-missing && \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Robust micromamba install: download, extract, chmod +x, verify binary and show diagnostics on failure
+# Robust micromamba install: download, extract, detect binary location, ensure exec bit and symlink
 ENV MAMBA_ROOT_PREFIX=/opt/conda
 RUN set -eux; \
     MICROMAMBA_URL="https://micromamba.snakepit.net/api/micromamba/linux-64/latest"; \
-    mkdir -p /opt/micromamba; \
+    mkdir -p /opt/micromamba /opt/micromamba/bin /tmp/micromamba-extract; \
     wget -O /tmp/micromamba.tar.bz2 "${MICROMAMBA_URL}"; \
-    # Basic sanity check: file size > 0
     if [ ! -s /tmp/micromamba.tar.bz2 ]; then echo "micromamba archive is empty"; ls -l /tmp/micromamba.tar.bz2; exit 1; fi; \
-    tar -xjf /tmp/micromamba.tar.bz2 -C /opt/micromamba --strip-components=1; \
-    # ensure executables have exec bit (some tar variants might preserve, enforce it)
-    chmod -R a+rx /opt/micromamba/bin || true; \
+    tar -xjf /tmp/micromamba.tar.bz2 -C /tmp/micromamba-extract || { echo "tar extraction failed"; ls -la /tmp/micromamba-extract; exit 1; }; \
+    # Find micromamba binary in the extracted tree and move to /opt/micromamba/bin
+    if [ -f /tmp/micromamba-extract/bin/micromamba ]; then \
+      mv /tmp/micromamba-extract/bin/* /opt/micromamba/bin/; \
+    elif [ -f /tmp/micromamba-extract/micromamba ]; then \
+      mv /tmp/micromamba-extract/micromamba /opt/micromamba/bin/; \
+    else \
+      # fallback: search for any file named micromamba and move it
+      FOUND="$(find /tmp/micromamba-extract -type f -name micromamba | head -n1)"; \
+      if [ -n "$FOUND" ]; then mv "$FOUND" /opt/micromamba/bin/; else echo "micromamba binary not found in archive"; ls -R /tmp/micromamba-extract; exit 1; fi; \
+    fi; \
+    chmod -R a+rx /opt/micromamba /opt/micromamba/bin || true; \
     ln -sf /opt/micromamba/bin/micromamba /usr/local/bin/micromamba; \
-    rm -f /tmp/micromamba.tar.bz2; \
-    # Verify: if micromamba fails, dump diagnostics to help debugging
+    rm -rf /tmp/micromamba.tar.bz2 /tmp/micromamba-extract; \
+    # verify executable and print diagnostics on failure
     if ! /usr/local/bin/micromamba --version >/dev/null 2>&1; then \
-      echo "=== micromamba diagnostics ==="; \
-      ls -la /opt/micromamba || true; \
-      ls -la /opt/micromamba/bin || true; \
-      file /opt/micromamba/bin/micromamba || true; \
-      ldd /opt/micromamba/bin/micromamba || true; \
-      /usr/local/bin/micromamba --version || true; \
-      echo "=== end diagnostics ==="; \
-      exit 1; \
-    fi
+      echo "=== micromamba diagnostics ==="; ls -la /opt/micromamba || true; ls -la /opt/micromamba/bin || true; file /opt/micromamba/bin/micromamba || true; ldd /opt/micromamba/bin/micromamba || true; /usr/local/bin/micromamba --version || true; echo "=== end diagnostics ==="; exit 1; fi
 
 # Ensure micromamba and (eventual) env come first on PATH for subsequent RUNs
 ENV PATH="/opt/micromamba/bin:${MAMBA_ROOT_PREFIX}/env/bin:${PATH}"
