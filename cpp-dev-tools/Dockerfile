@@ -8,8 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /workspace
 
-# Combine package installs where reasonable to reduce layers.
-# Add PPAs needed (toolchain for newer gcc, deadsnakes for python3.11).
+# Basic deps + PPAs (ensure bzip2 for .tar.bz2 extraction)
 RUN apt-get update --fix-missing && \
     apt-get install -y --no-install-recommends \
       software-properties-common \
@@ -20,6 +19,8 @@ RUN apt-get update --fix-missing && \
       gnupg2 \
       apt-transport-https \
       dirmngr \
+      bzip2 \
+      tar \
     && add-apt-repository ppa:ubuntu-toolchain-r/test -y \
     && add-apt-repository ppa:deadsnakes/ppa -y \
     && apt-get update --fix-missing && \
@@ -43,6 +44,37 @@ RUN apt-get update --fix-missing && \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install micromamba in a robust way and put it on PATH
+ENV MAMBA_ROOT_PREFIX=/opt/conda
+RUN set -eux; \
+    MICROMAMBA_URL="https://micromamba.snakepit.net/api/micromamba/linux-64/latest"; \
+    mkdir -p /opt/micromamba; \
+    wget -qO /tmp/micromamba.tar.bz2 "${MICROMAMBA_URL}"; \
+    tar -xjf /tmp/micromamba.tar.bz2 -C /opt/micromamba --strip-components=1; \
+    ln -sf /opt/micromamba/bin/micromamba /usr/local/bin/micromamba; \
+    rm -f /tmp/micromamba.tar.bz2; \
+    /usr/local/bin/micromamba --version
+
+# Ensure micromamba and the eventual env are on PATH for subsequent RUNs
+ENV PATH="/opt/micromamba/bin:${MAMBA_ROOT_PREFIX}/env/bin:${PATH}"
+
+# ARG flags for optional AI/LLM/Quantum layers
+ARG ENABLE_AI=true
+ARG ENABLE_LLM=true
+ARG ENABLE_QUANTUM=true
+ARG ENABLE_TPU=false
+ARG ENABLE_NPU=false
+ARG CUDA_VERSION=12.1
+
+# Create a named micromamba env (only if flags require it)
+RUN if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
+      /opt/micromamba/bin/micromamba create -y -p ${MAMBA_ROOT_PREFIX}/env python=3.11 && \
+      /opt/micromamba/bin/micromamba clean --all -f -y; \
+    fi
+
+# From here, prefer the micromamba env python when available
+ENV PATH="${MAMBA_ROOT_PREFIX}/env/bin:${PATH}"
+
 # Install GitLab Runner from official packages.gitlab.com repository (signed)
 RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends gnupg curl lsb-release ca-certificates && \
     curl -fsSL https://packages.gitlab.com/runner/gitlab-runner/gpgkey | gpg --dearmor -o /usr/share/keyrings/gitlab-runner-archive-keyring.gpg && \
@@ -56,13 +88,30 @@ RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && \
     /tmp/llvm.sh 17 && \
     rm /tmp/llvm.sh
 
-# Install Python 3.11 and pip packages using python3.11 explicitly.
-RUN apt-get update --fix-missing && \
-    apt-get install -y --no-install-recommends \
-      python3.11 python3.11-dev python3.11-venv python3-pip \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 100 \
-    && python3 -m pip install --upgrade pip setuptools wheel \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install Python dependencies (fallback if micromamba env not created)
+# Use python3 from micromamba env when available; otherwise system python3.11
+RUN set -eux; \
+    # ensure pip exists in active python
+    if command -v python3 >/dev/null 2>&1; then \
+      python3 -m pip install --upgrade pip setuptools wheel || true; \
+    fi; \
+    python3 -m pip install --no-cache-dir \
+      cuda-python \
+      cupy-cuda12x \
+      pycuda \
+      numba \
+      numpy \
+      scipy \
+      scikit-learn \
+      pandas \
+      matplotlib \
+      jupyter \
+      xarray \
+      "dask[complete]" \
+      mpi4py \
+      netCDF4 \
+      h5py \
+      pytest tox || true
 
 # Install Go 1.24
 RUN wget -q https://go.dev/dl/go1.24.0.linux-amd64.tar.gz -O /tmp/go.tar.gz && \
@@ -90,107 +139,34 @@ RUN apt-get update --fix-missing && \
     cd / && rm -rf /tmp/cccl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Python packages: group heavy installs to reduce layers. Use python3 -m pip to ensure correct binary.
-# If you need reproducible builds, pin versions or use constraints files.
-RUN python3 -m pip install --upgrade \
-      pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir \
-      cuda-python \
-      cupy-cuda12x \
-      pycuda \
-      numba \
-      numpy \
-      scipy \
-      scikit-learn \
-      pandas \
-      matplotlib \
-      jupyter \
-      xarray \
-      "dask[complete]" \
-      mpi4py \
-      netCDF4 \
-      h5py \
-      pytest tox
-
-# Extensions pour AI / LLM / Quantum (snippet à intégrer dans votre Dockerfile existant)
-ARG ENABLE_AI=true
-ARG ENABLE_LLM=true
-ARG ENABLE_QUANTUM=true
-ARG ENABLE_TPU=false    # TPU require cloud/runtime - leave false for local builds
-ARG ENABLE_NPU=false    # NPU (Graphcore/Habana/Ascend) - vendor images preferred
-ARG CUDA_VERSION=12.1
-
-# -- prerequisites: micromamba (recommended) to manage Python & binaries --
-RUN set -eux; \
-    if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
-      wget -qO /tmp/micromamba.tar.bz2 "https://micromamba.snakepit.net/api/micromamba/linux-64/latest" && \
-      mkdir -p /opt/micromamba && \
-      tar -xjf /tmp/micromamba.tar.bz2 -C /opt/micromamba --strip-components=1 && \
-      ln -s /opt/micromamba/bin/micromamba /usr/local/bin/micromamba && \
-      rm /tmp/micromamba.tar.bz2; \
-    fi
-
-# -- Create a named environment to keep Python deps isolated --
-ENV MAMBA_ROOT_PREFIX=/opt/conda
-RUN if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
-      micromamba create -y -p ${MAMBA_ROOT_PREFIX}/env python=3.11 && \
-      micromamba clean --all -f -y; \
-    fi
-ENV PATH="${MAMBA_ROOT_PREFIX}/env/bin:${PATH}"
-
-# -- NVIDIA extras (cuDNN, NCCL, TensorRT) - prefer NVIDIA apt repos or use NGC containers --
-# NOTE: on many systems these should come from the host / vendor image; here we show apt-style install placeholders.
+# Optional: NVIDIA extras (cuDNN/NCCL placeholders) - enable only if ENABLE_AI=true
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
       apt-get update && \
-      # Example: install cuDNN / NCCL packages (names and availability depend on CUDA version & NVIDIA repo)
-      # You should add NVIDIA's apt repo and keys prior to these installs for correct versions.
-      apt-get install -y --no-install-recommends \
-        libcudnn8 libcudnn8-dev libnccl2 libnccl-dev && \
+      apt-get install -y --no-install-recommends libcudnn8 libcudnn8-dev libnccl2 libnccl-dev || true && \
       apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# -- Install common ML & LLM Python packages --
+# ML/LLM/Quantum Python layers (respect ARG flags)
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
-      # install core ML libs - prefer pinned versions for reproducibility
       pip install --no-cache-dir -U pip setuptools wheel && \
-      # PyTorch (choose correct wheel or use conda channel if wheel not available)
       pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 || true && \
-      # TensorFlow (ensure TF build matches CUDA / cuDNN versions); may require specific package or build
       pip install --no-cache-dir tensorflow==2.14.* || true && \
-      # JAX + jaxlib for CUDA (check jaxlib wheel for CUDA 12.x)
       pip install --no-cache-dir jax jaxlib==0.4.*+cuda121 -f https://storage.googleapis.com/jax-releases/jax_releases.html || true && \
-      # other useful libs
-      pip install --no-cache-dir numpy scipy pandas scikit-learn matplotlib numba mpi4py && \
-      micromamba clean --all -f -y; \
-    fi
-
-# -- LLM ecosystem (huggingface, accelerate, deepspeed, bitsandbytes, xformers, transformers) --
-RUN if [ "${ENABLE_LLM}" = "true" ]; then \
-      pip install --no-cache-dir transformers accelerate optimum datasets tokenizers safetensors && \
-      # DeepSpeed (may require compiling C++/CUDA extensions) - prefer installing from released wheel
-      pip install --no-cache-dir deepspeed && \
-      # bitsandbytes: requires CUDA compatibility (may fail on unsupported CUDA)
+      micromamba clean --all -f -y || true; \
+    fi && \
+    if [ "${ENABLE_LLM}" = "true" ]; then \
+      pip install --no-cache-dir transformers accelerate optimum datasets tokenizers safetensors || true && \
+      pip install --no-cache-dir deepspeed || true && \
       pip install --no-cache-dir bitsandbytes || true && \
-      # xformers: often needs to be built from source for your CUDA/GCC combo; provide placeholder
       pip install --no-cache-dir xformers || true; \
-    fi
-
-# -- Quantum SDKs and simulators --
-RUN if [ "${ENABLE_QUANTUM}" = "true" ]; then \
+    fi && \
+    if [ "${ENABLE_QUANTUM}" = "true" ]; then \
       pip install --no-cache-dir qiskit==0.47.* cirq pennylane qulacs || true && \
-      # NVIDIA cuQuantum (pip package) for GPU accelerated simulation (requires CUDA libs)
       pip install --no-cache-dir cuquantum || true; \
     fi
 
-# -- TPU note: libtpu / JAX on TPU require cloud TPU VM or specific packages --
-# If ENABLE_TPU=true then user must swap to official Google Cloud TPU VM images or install libtpu
-# (not shown here; see https://cloud.google.com/tpu/docs)
-
-# -- NPU note: for Graphcore/Habana/Ascend use vendor base images & SDKs --
-# If ENABLE_NPU=true, fetch vendor images (Graphcore Poplar, Habana SynapseAI) and follow vendor docs.
-
-# -- Helpful CI / dev tools for LLM training & profiling --
-RUN pip install --no-cache-dir nvidia-ml-py3 gpustat nvtx-plugins && \
+# Helpful CI / dev tools for LLM training & profiling
+RUN pip install --no-cache-dir nvidia-ml-py3 gpustat nvtx-plugins || true && \
     apt-get update && apt-get install -y --no-install-recommends htop jq && rm -rf /var/lib/apt/lists/*
 
 # Final housekeeping
