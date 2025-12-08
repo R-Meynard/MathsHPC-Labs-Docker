@@ -39,6 +39,8 @@ RUN apt-get update --fix-missing && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
     python3 -m pip install --upgrade pip setuptools wheel && \
+    # Install a modern CMake via pip to avoid CMake policy / compatibility errors
+    python3 -m pip install --no-cache-dir cmake && \
     rm -rf /var/lib/apt/lists/*
 
 # Clone and (conditionally) build PyTorch wheel
@@ -49,11 +51,14 @@ RUN set -eux; \
     if [ "${BUILD_PYTORCH}" = "true" ]; then \
       git clone --recursive --depth 1 --branch ${PYTORCH_TAG} https://github.com/pytorch/pytorch.git pytorch-src; \
       cd pytorch-src; \
+      # install python build deps declared by PyTorch (best-effort)
       python3 -m pip install -r requirements.txt || true; \
-      # determine a sensible parallelism value and export it as MAX_JOBS for the PyTorch build system
+      # determine a sensible parallelism value and export it as MAX_JOBS for PyTorch build system
       NJOBS="$(nproc 2>/dev/null || echo ${MAX_JOBS})"; \
       echo "Using ${NJOBS} parallel jobs for PyTorch build (MAX_JOBS=${NJOBS})"; \
-      # setuptools bdist_wheel does not accept -j; PyTorch build uses MAX_JOBS env var
+      # Provide a safe CMake policy fallback to avoid "Compatibility with CMake < 3.5" errors
+      export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5"; \
+      # Set MAX_JOBS env (PyTorch build system honors MAX_JOBS) and run bdist_wheel
       MAX_JOBS=${NJOBS} python3 setup.py bdist_wheel || (echo "first attempt failed, retry with MAX_JOBS=4" && MAX_JOBS=4 python3 setup.py bdist_wheel); \
       mkdir -p /tmp/out && mv dist/*.whl /tmp/out/pytorch.whl; \
     else \
