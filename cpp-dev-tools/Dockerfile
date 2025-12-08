@@ -1,5 +1,67 @@
 # Optimized Dockerfile - HPC + Backend Stack (based on nvidia/cuda:12.4.0-devel-ubuntu22.04)
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
+# Multi-stage: add a PyTorch builder stage to compile a wheel for MX250 (sm_61),
+# then keep your original final stage content (unchanged except to install the built wheel).
+# Build-time flags:
+#  --build-arg BUILD_PYTORCH=true|false
+#  --build-arg TORCH_CUDA_ARCH_LIST="6.1"
+#  --build-arg PYTORCH_TAG=v2.6.0
+#  --build-arg CUDA_VERSION=12.4.0
+ARG BUILD_PYTORCH=true
+ARG TORCH_CUDA_ARCH_LIST="6.1"
+ARG PYTORCH_TAG=v2.6.0
+ARG CUDA_VERSION=12.4.0
+
+# --------------------------
+# Stage 0: PyTorch builder
+# --------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS pytorch-builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    SHELL=/bin/bash \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+    CMAKE_C_COMPILER=/usr/bin/gcc-12 \
+    CMAKE_CXX_COMPILER=/usr/bin/g++-12 \
+    PYTORCH_BUILD_VERSION=${PYTORCH_TAG#v}
+
+WORKDIR /tmp
+
+# Minimal build deps for PyTorch; keep it focussed to reduce image size
+RUN apt-get update --fix-missing && \
+    apt-get install -y --no-install-recommends \
+      git build-essential cmake ninja-build ccache python3 python3-dev python3-pip \
+      python3-setuptools python3-wheel patchelf pkg-config libnuma-dev wget curl \
+      gcc-12 g++-12 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
+    python3 -m pip install --upgrade pip setuptools wheel && \
+    rm -rf /var/lib/apt/lists/*
+
+# Clone and (conditionally) build PyTorch wheel
+ARG BUILD_PYTORCH
+ARG PYTORCH_TAG
+RUN set -eux; \
+    if [ "${BUILD_PYTORCH}" = "true" ]; then \
+      git clone --recursive --depth 1 --branch ${PYTORCH_TAG} https://github.com/pytorch/pytorch.git pytorch-src; \
+      cd pytorch-src; \
+      python3 -m pip install -r requirements.txt || true; \
+      # lower parallelism when disk/RAM is constrained: replace $(nproc) with a smaller number if needed
+      python3 setup.py bdist_wheel -j"$(nproc)" || python3 setup.py bdist_wheel -j4; \
+      mkdir -p /tmp/out && mv dist/*.whl /tmp/out/pytorch.whl; \
+    else \
+      # create an empty placeholder so COPY in final stage never fails
+      mkdir -p /tmp/out && touch /tmp/out/pytorch.whl; \
+    fi
+
+# Ensure the produced wheel (or placeholder) is at /tmp/out/pytorch.whl
+RUN ls -l /tmp/out || true
+
+# --------------------------
+# Final stage: original image base + your full content
+# --------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -79,7 +141,9 @@ ARG ENABLE_LLM=true
 ARG ENABLE_QUANTUM=true
 ARG ENABLE_TPU=false
 ARG ENABLE_NPU=false
-ARG CUDA_VERSION=12.4.0
+
+# Keep CUDA_VERSION arg in the final stage for reference
+ARG CUDA_VERSION
 
 # Create a named micromamba env (use absolute micromamba path to avoid PATH timing issues)
 RUN if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
@@ -160,11 +224,18 @@ RUN if [ "${ENABLE_AI}" = "true" ]; then \
       apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# --------------------------
+# Copy PyTorch wheel from builder stage (if built)
+# --------------------------
+# Copy the wheel (or placeholder) produced by the builder stage into the final image
+COPY --from=pytorch-builder /tmp/out/pytorch.whl /tmp/pytorch.whl
+
 # ML/LLM/Quantum Python layers (respect ARG flags)
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
       python3 -m pip install --no-cache-dir -U pip setuptools wheel && \
-      # Install PyTorch wheels compiled for CUDA 12.4 (cu124) where available
-      pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu124 || true && \
+      # If builder produced a real wheel it will be installed; otherwise fallback to pip wheel (cu124 index)
+      python3 -m pip install --no-cache-dir /tmp/pytorch.whl || \
+        pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu124 || true && \
       # TensorFlow: try GPU wheel for recent TF first, fallback to CPU-only if incompatible
       pip install --no-cache-dir tensorflow==2.20.* || pip install --no-cache-dir tensorflow-cpu || true && \
       # JAX: use the CUDA12 plugin when available (ML-OSS index). This targets CUDA12-compatible jaxlib.
