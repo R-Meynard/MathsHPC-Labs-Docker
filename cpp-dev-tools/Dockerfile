@@ -1,5 +1,5 @@
-# Optimized Dockerfile - HPC + Backend Stack (based on nvidia/cuda:12.1.0-devel-ubuntu22.04)
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+# Optimized Dockerfile - HPC + Backend Stack (based on nvidia/cuda:12.4.0-devel-ubuntu22.04)
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -79,7 +79,7 @@ ARG ENABLE_LLM=true
 ARG ENABLE_QUANTUM=true
 ARG ENABLE_TPU=false
 ARG ENABLE_NPU=false
-ARG CUDA_VERSION=12.1
+ARG CUDA_VERSION=12.4.0
 
 # Create a named micromamba env (use absolute micromamba path to avoid PATH timing issues)
 RUN if [ "${ENABLE_AI}" = "true" ] || [ "${ENABLE_LLM}" = "true" ] || [ "${ENABLE_QUANTUM}" = "true" ]; then \
@@ -155,22 +155,27 @@ RUN apt-get update --fix-missing && \
 # Optional: NVIDIA extras (cuDNN/NCCL placeholders)
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
       apt-get update && \
+      # attempt to install libcudnn / nccl packages if present in distro repos (best-effort)
       apt-get install -y --no-install-recommends libcudnn8 libcudnn8-dev libnccl2 libnccl-dev || true && \
       apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
 # ML/LLM/Quantum Python layers (respect ARG flags)
 RUN if [ "${ENABLE_AI}" = "true" ]; then \
-      pip install --no-cache-dir -U pip setuptools wheel && \
-      pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 || true && \
-      pip install --no-cache-dir tensorflow==2.14.* || true && \
-      pip install --no-cache-dir jax jaxlib==0.4.*+cuda121 -f https://storage.googleapis.com/jax-releases/jax_releases.html || true && \
+      python3 -m pip install --no-cache-dir -U pip setuptools wheel && \
+      # Install PyTorch wheels compiled for CUDA 12.4 (cu124) where available
+      pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu124 || true && \
+      # TensorFlow: try GPU wheel for recent TF first, fallback to CPU-only if incompatible
+      pip install --no-cache-dir tensorflow==2.20.* || pip install --no-cache-dir tensorflow-cpu || true && \
+      # JAX: use the CUDA12 plugin when available (ML-OSS index). This targets CUDA12-compatible jaxlib.
+      pip install -U --pre jax jaxlib "jax-cuda12-plugin[with-cuda]" jax-cuda12-pjrt -i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/ || true && \
       /opt/micromamba/bin/micromamba clean --all -f -y || true; \
     fi && \
     if [ "${ENABLE_LLM}" = "true" ]; then \
       pip install --no-cache-dir transformers accelerate optimum datasets tokenizers safetensors || true && \
       pip install --no-cache-dir deepspeed || true && \
       pip install --no-cache-dir bitsandbytes || true && \
+      # xformers may require a compiled wheel for your CUDA/torch combo; attempt pip first
       pip install --no-cache-dir xformers || true; \
     fi && \
     if [ "${ENABLE_QUANTUM}" = "true" ]; then \
