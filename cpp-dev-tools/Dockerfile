@@ -6,10 +6,12 @@
 #  --build-arg TORCH_CUDA_ARCH_LIST="6.1"
 #  --build-arg PYTORCH_TAG=v2.6.0
 #  --build-arg CUDA_VERSION=12.4.0
+#  --build-arg MAX_JOBS=4
 ARG BUILD_PYTORCH=true
 ARG TORCH_CUDA_ARCH_LIST="6.1"
 ARG PYTORCH_TAG=v2.6.0
 ARG CUDA_VERSION=12.4.0
+ARG MAX_JOBS=4
 
 # --------------------------
 # Stage 0: PyTorch builder
@@ -42,13 +44,17 @@ RUN apt-get update --fix-missing && \
 # Clone and (conditionally) build PyTorch wheel
 ARG BUILD_PYTORCH
 ARG PYTORCH_TAG
+ARG MAX_JOBS
 RUN set -eux; \
     if [ "${BUILD_PYTORCH}" = "true" ]; then \
       git clone --recursive --depth 1 --branch ${PYTORCH_TAG} https://github.com/pytorch/pytorch.git pytorch-src; \
       cd pytorch-src; \
       python3 -m pip install -r requirements.txt || true; \
-      # lower parallelism when disk/RAM is constrained: replace $(nproc) with a smaller number if needed
-      python3 setup.py bdist_wheel -j"$(nproc)" || python3 setup.py bdist_wheel -j4; \
+      # determine a sensible parallelism value and export it as MAX_JOBS for the PyTorch build system
+      NJOBS="$(nproc 2>/dev/null || echo ${MAX_JOBS})"; \
+      echo "Using ${NJOBS} parallel jobs for PyTorch build (MAX_JOBS=${NJOBS})"; \
+      # setuptools bdist_wheel does not accept -j; PyTorch build uses MAX_JOBS env var
+      MAX_JOBS=${NJOBS} python3 setup.py bdist_wheel || (echo "first attempt failed, retry with MAX_JOBS=4" && MAX_JOBS=4 python3 setup.py bdist_wheel); \
       mkdir -p /tmp/out && mv dist/*.whl /tmp/out/pytorch.whl; \
     else \
       # create an empty placeholder so COPY in final stage never fails
