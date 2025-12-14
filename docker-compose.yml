@@ -50,6 +50,7 @@ services:
     volumes:
       - ./workspace:/workspace:cached
       - ./MathsHPC-Labs:/workspace/MathsHPC-Labs:cached
+      - ./hpc-backend-stack:/workspace/hpc-backend-stack:cached        # <--- AJOUTEZ CETTE LIGNE
       - ./cpp-dev-tools:/cpp-dev-tools:ro
       - /var/run/docker.sock:/var/run/docker.sock        # careful: grants host docker control
       - ${HOME}/.ssh:/root/.ssh:ro                       # mount to /root when container runs as root
