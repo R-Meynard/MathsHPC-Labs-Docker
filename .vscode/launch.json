@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch (prompt program path, build nearest parent)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:programPath}",
+      "args": [],
+      "cwd": "${input:programCwd}",
+      "stopAtEntry": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "cmake-build-nearest"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "programPath",
+      "type": "promptString",
+      "description": "Chemin absolu du binaire DANS le conteneur (par défaut : binaire debug du build root).",
+      "default": "/workspace/hpc-backend-stack/cpp-programming/30_day_training/jour_01_raii/build/jour_01_raii"
+    },
+    {
+      "id": "programCwd",
+      "type": "promptString",
+      "description": "Répertoire de travail DANS le conteneur (par défaut : racine du projet).",
+      "default": "/workspace/hpc-backend-stack/cpp-programming/30_day_training/jour_01_raii"
+    }
+  ]
+}

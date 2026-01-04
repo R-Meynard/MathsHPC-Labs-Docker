@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cmake-configure-nearest",
+      "type": "shell",
+      "command": "bash -lc 'd=\"${fileDirname}\"; while [ \"$d\" != \"/\" ] && [ ! -f \"$d/CMakeLists.txt\" ]; do d=$(dirname \"$d\"); done; if [ ! -f \"$d/CMakeLists.txt\" ]; then echo \"No CMakeLists.txt found starting from ${fileDirname}\" >&2; exit 1; fi; echo \"Configuring project at: $d\"; cmake -S \"$d\" -B \"$d/build\" -DCMAKE_BUILD_TYPE=Debug'",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "cmake-build-nearest",
+      "dependsOn": "cmake-configure-nearest",
+      "type": "shell",
+      "command": "bash -lc 'd=\"${fileDirname}\"; while [ \"$d\" != \"/\" ] && [ ! -f \"$d/CMakeLists.txt\" ]; do d=$(dirname \"$d\"); done; if [ ! -f \"$d/CMakeLists.txt\" ]; then echo \"No CMakeLists.txt found starting from ${fileDirname}\" >&2; exit 1; fi; echo \"Building project at: $d/build\"; cmake --build \"$d/build\" -- -j${env:NUM_JOBS:-4}'",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}
