@@ -1,31 +1,86 @@
 {
   "version": "0.2.0",
   "configurations": [
+    // ============================================================
+    // C++ - GDB (works well for most Linux C++ debugging)
+    // ============================================================
     {
-      "name": "Launch (prompt program path, build nearest parent)",
+      "name": "C++: Launch (gdb) - pick executable",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${input:programPath}",
-      "args": [],
-      "cwd": "${input:programCwd}",
-      "stopAtEntry": false,
       "MIMode": "gdb",
-      "miDebuggerPath": "/usr/bin/gdb",
-      "preLaunchTask": "cmake-build-nearest"
+      "program": "${command:pickFile}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "setupCommands": [
+        { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ]
+    },
+
+    // ============================================================
+    // C++ - LLDB (via cpptools, good alternative to gdb)
+    // Note: depending on your setup, this may use lldb-mi or lldb-dap.
+    // If it fails, use the CodeLLDB config below for LLDB.
+    // ============================================================
+    {
+      "name": "C++: Launch (lldb) - pick executable",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "lldb",
+      "program": "${command:pickFile}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "externalConsole": false
+    },
+
+    // ============================================================
+    // Rust - CodeLLDB (recommended)
+    // You pick the compiled binary (target/debug/<bin> or target/release/<bin>)
+    // ============================================================
+    {
+      "name": "Rust: Launch (CodeLLDB) - pick executable",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${command:pickFile}",
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+
+    // ============================================================
+    // Python - debugpy (VS Code Python extension)
+    // Debug the currently opened file
+    // ============================================================
+    {
+      "name": "Python: Current file (debugpy)",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+
+    // ============================================================
+    // Python - Module (useful for "python -m package.module")
+    // ============================================================
+    {
+      "name": "Python: Module (debugpy)",
+      "type": "python",
+      "request": "launch",
+      "module": "${input:pythonModule}",
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ],
+
   "inputs": [
     {
-      "id": "programPath",
+      "id": "pythonModule",
       "type": "promptString",
-      "description": "Chemin absolu du binaire DANS le conteneur (par défaut : binaire debug du build root).",
-      "default": "/workspace/hpc-backend-stack/cpp-programming/30_day_training/jour_01_raii/build/jour_01_raii"
-    },
-    {
-      "id": "programCwd",
-      "type": "promptString",
-      "description": "Répertoire de travail DANS le conteneur (par défaut : racine du projet).",
-      "default": "/workspace/hpc-backend-stack/cpp-programming/30_day_training/jour_01_raii"
+      "description": "Python module to run (like: package.module)",
+      "default": "main"
     }
   ]
 }

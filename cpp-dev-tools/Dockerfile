@@ -7,7 +7,7 @@
 #  --build-arg PYTORCH_TAG=v2.6.0
 #  --build-arg CUDA_VERSION=12.4.0
 #  --build-arg MAX_JOBS=4
-ARG BUILD_PYTORCH=true
+ARG BUILD_PYTORCH=false
 ARG TORCH_CUDA_ARCH_LIST="6.1"
 ARG PYTORCH_TAG=v2.6.0
 ARG CUDA_VERSION=12.4.0
@@ -103,6 +103,8 @@ RUN apt-get update --fix-missing && \
       gcc-12 g++-12 gfortran-12 build-essential cmake ninja-build make automake autoconf libtool pkg-config \
       # development tools
       git vim nano sudo openssh-client openssh-server \
+      # documentation
+      doxygen graphviz \
       # debugging / profiling
       gdb gdbserver lldb valgrind cppcheck splint flawfinder strace ltrace htop iotop sysstat stress-ng \
       # MPI
@@ -199,19 +201,148 @@ RUN set -eux; \
       mpi4py \
       netCDF4 \
       h5py \
+      debugpy \
       pytest tox || true
 
 # Install Go 1.24
-RUN wget -q https://go.dev/dl/go1.24.0.linux-amd64.tar.gz -O /tmp/go.tar.gz && \
-    tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
+# -----------------------------------------------------------------------------
+# Go toolchain + HPC-oriented tooling
+# -----------------------------------------------------------------------------
+# Goals:
+# - Install Go toolchain from go.dev (version pinned via ARG)
+# - Configure caches to benefit from Docker volumes (go-modules-cache)
+# - Install common HPC-ish tools: lint/static analysis, vuln scanning, profiling/bench utilities
+#
+# Notes:
+# - Gonum / grpc / nats etc. are Go module deps for your projects (go.mod), not global installs.
+# - Tools installed here are CLI commands used in dev/CI.
+
+ARG GO_VERSION=1.24.0
+
+# (Optional) extra system deps used by some Go tooling / cgo workflows
+# You already install a lot earlier; this is just to be safe for Go+cgo usage.
+RUN apt-get update --fix-missing && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      build-essential \
+      pkg-config \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Go from official tarball
+RUN set -eux; \
+    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz; \
+    rm -rf /usr/local/go; \
+    tar -C /usr/local -xzf /tmp/go.tar.gz; \
+    rm -f /tmp/go.tar.gz; \
+    /usr/local/go/bin/go version
+
+# Go environment tuned for reproducible builds + caching
 ENV GOROOT=/usr/local/go \
     GOPATH=/root/go \
-    PATH=$PATH:/usr/local/go/bin:/root/go/bin
+    GOMODCACHE=/root/go/pkg/mod \
+    GOCACHE=/root/go-build \
+    CGO_ENABLED=1 \
+    GO111MODULE=on \
+    PATH=/usr/local/go/bin:/root/go/bin:${PATH}
+
+# Install Go tools (HPC-friendly set: profiling/bench + quality + vuln)
+RUN set -eux; \
+    go env -w GOMODCACHE="${GOMODCACHE}"; \
+    go env -w GOCACHE="${GOCACHE}"; \
+    \
+    # Quality / lint
+    go install honnef.co/go/tools/cmd/staticcheck@latest; \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+    \
+    # Security / vuln
+    go install golang.org/x/vuln/cmd/govulncheck@latest; \
+    \
+    # Bench / perf / profiling helpers
+    go install golang.org/x/perf/cmd/benchstat@latest; \
+    go install github.com/google/pprof@latest; \
+    \
+    # Dev productivity (optional but handy)
+    go install golang.org/x/tools/cmd/goimports@latest; \
+    go install golang.org/x/tools/gopls@latest; \
+    \
+    # Sanity check
+    golangci-lint --version; \
+    staticcheck -version || true; \
+    govulncheck -version || true; \
+    go version
 
 # Install Rust (non-interactive)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    /root/.cargo/bin/rustc --version
+# -----------------------------------------------------------------------------
+# Rust toolchain + HPC-oriented tooling
+# -----------------------------------------------------------------------------
+# Notes:
+# - HPC crates (rayon/rsmpi/ndarray/faer/cudarc/...) are dependencies per-project (Cargo.toml).
+# - Here we install the Rust toolchain + components + CLI tools + system deps needed for HPC/FFI/perf.
+#
+# Provides:
+#   - rustup/cargo/rustc (stable)
+#   - components: clippy, rustfmt, rust-analyzer
+#   - tools: cargo-nextest, cargo-expand, cargo-edit, cargo-deny, cargo-audit,
+#            cargo-flamegraph, cargo-asm, cargo-llvm-lines, cargo-bloat, hyperfine
+#   - bindgen support via clang/libclang
+#   - perf tooling (best-effort inside container; may require extra privileges at runtime)
+
+# System deps for common Rust HPC workflows (FFI, perf, OpenSSL-based crates, etc.)
+RUN apt-get update --fix-missing && \
+    apt-get install -y --no-install-recommends \
+      # Rust crates that rely on OpenSSL (cargo-audit, some deps)
+      pkg-config \
+      libssl-dev \
+      # FFI / bindgen (bindgen uses libclang)
+      clang \
+      llvm \
+      libclang-dev \
+      # perf / flamegraph prerequisites (best-effort)
+      linux-tools-common \
+      linux-tools-generic \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* || true
+
+# Install Rust with rustup (non-interactive), add components, then install cargo tools
+ENV CARGO_HOME=/root/.cargo \
+    RUSTUP_HOME=/root/.rustup
+RUN set -eux; \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
+    . "${CARGO_HOME}/env"; \
+    rustup default stable; \
+    rustup component add clippy rustfmt rust-analyzer; \
+    \
+    # HPC/dev productivity + perf tooling
+    cargo install --locked \
+    cargo-edit \
+    cargo-watch \
+    cargo-nextest \
+    cargo-expand \
+    cargo-deny \
+    cargo-audit \
+    cargo-asm \
+    cargo-llvm-lines \
+    cargo-bloat \
+    hyperfine; \
+  \
+  cargo install --locked cargo-flamegraph || true; \
+    \
+    # Optional cleanup to reduce image size (keeps installed binaries)
+    rm -rf "${CARGO_HOME}/registry" "${CARGO_HOME}/git"; \
+    \
+    rustc --version; \
+    cargo --version; \
+    cargo clippy -V; \
+    rustfmt --version
+
+# Ensure cargo binaries are on PATH for subsequent layers + interactive shells
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Nice-to-have env vars for BLAS/LAPACK crates that use system OpenBLAS
+# (they are already installed earlier in this Dockerfile)
+ENV OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1
 
 # Build NVIDIA CCCL (keep separate so failures are isolated)
 RUN apt-get update --fix-missing && \
