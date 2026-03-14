@@ -24,11 +24,12 @@ services:
       PYTHONPATH: "/workspaces"
 
     volumes:
-      - ${HOME}/Workspace/MathsHPC-Labs:/workspaces/MathsHPC-Labs:cached
-      - ${HOME}/Workspace/hpc-backend-stack:/workspaces/hpc-backend-stack:cached
+      - /home/rolih/Workspace/MathsHPC-Labs-Docker:/workspaces/MathsHPC-Labs-Docker:cached
+      - /home/rolih/Workspace/MathsHPC-Labs:/workspaces/MathsHPC-Labs:cached
+      - /home/rolih/Workspace/hpc-backend-stack:/workspaces/hpc-backend-stack:cached
 
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.ssh:/root/.ssh:ro
+      - /home/rolih/.ssh:/root/.ssh:ro
 
       - go-modules-cache:/root/go
       - pip-cache:/root/.cache/pip
